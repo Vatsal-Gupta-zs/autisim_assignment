@@ -16,10 +16,10 @@ import glob
 # --- 1. Configuration ---
 # IMPORTANT: Replace with your actual Hugging Face access token (https://huggingface.co/settings/tokens)
 # Please accept the terms and conditons from: https://huggingface.co/pyannote/speaker-diarization-3.1
-YOUR_HF_TOKEN = "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" #"PASTE_YOUR_HUGGING_FACE_TOKEN_HERE"
+YOUR_HF_TOKEN = "PASTE_YOUR_HUGGING_FACE_TOKEN_HERE"
 
 # Your Google AI API key for Gemini (https://aistudio.google.com/app/apikey)
-YOUR_GOOGLE_API_KEY = "AIzaSyASYSqbrn3hHPz7U3ZxEmDOXer3v9lHCzk" #"PASTE_YOUR_GOOGLE_API_KEY_HERE"
+YOUR_GOOGLE_API_KEY = "PASTE_YOUR_GOOGLE_API_KEY_HERE"
 
 # Path to the folder containing your audio files
 INPUT_FOLDER_PATH = "Data_Audio_Files/" # Create a folder named "audio_files" and place your audio files there.
@@ -201,4 +201,5 @@ if __name__ == "__main__":
             summary_df.to_csv(OUTPUT_CSV_PATH, index=False)
             print(f"\n--- Batch Processing Complete! ---")
             print(f"Summary of {len(all_summaries)} file(s) saved to '{OUTPUT_CSV_PATH}'.")
+
 
