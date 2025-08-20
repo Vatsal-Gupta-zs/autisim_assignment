@@ -14,11 +14,11 @@ import google.generativeai as genai
 import glob 
 
 # --- 1. Configuration ---
-# IMPORTANT: Replace with your actual Hugging Face access token (https://huggingface.co/settings/tokens)
-# Please accept the terms and conditons from: https://huggingface.co/pyannote/speaker-diarization-3.1
+# IMPORTANT: Replace with your actual Hugging Face access token (https://huggingface.co/settings/tokens     )
+# Please accept the terms and conditons from: https://huggingface.co/pyannote/speaker-diarization-3.1     
 YOUR_HF_TOKEN = "PASTE_YOUR_HUGGING_FACE_TOKEN_HERE"
 
-# Your Google AI API key for Gemini (https://aistudio.google.com/app/apikey)
+# Your Google AI API key for Gemini (https://aistudio.google.com/app/apikey     )
 YOUR_GOOGLE_API_KEY = "PASTE_YOUR_GOOGLE_API_KEY_HERE"
 
 # Path to the folder containing your audio files
@@ -43,21 +43,32 @@ def get_call_intent(model, full_transcript):
 
     # A more detailed prompt for intent classification in a specific domain
     prompt = f"""
-    Based on the following transcript from a telemedicine call, identify the primary intent of the call.
-    Choose from one of the following categories:
-    - "Appointment Scheduling": For booking, rescheduling, or canceling appointments.
-    - "Prescription Refill": For requesting a refill of an existing medication.
-    - "Symptom Discussion": When the patient is describing symptoms for a new or ongoing issue.
-    - "Medical Advice/Question": For general medical questions not tied to a new diagnosis.
-    - "Follow-up Consultation": Discussing progress or results after a previous appointment.
-    - "Billing Inquiry": Questions related to billing, insurance, or payments.
-    - "Other": If the intent does not clearly fit into any of the above categories.
+    Based on the following transcript from a telemedicine call, identify:
+    
+    1. The **primary intent** of the call. Choose from one of the following categories:
+       - "Appointment Scheduling"
+       - "Prescription Refill"
+       - "Symptom Discussion"
+       - "Medical Advice/Question"
+       - "Follow-up Consultation"
+       - "Billing Inquiry"
+       - "Other"
 
-    Respond with only the category name.
+    2. The **subject matter** of the call. 
+       - If the intent is "Symptom Discussion", "Medical Advice/Question", or "Follow-up Consultation", 
+         specify the main medical area involved (e.g., "Gastrointestinal", "Cardiovascular", "Respiratory", 
+         "Neurological", "Dermatological", "Musculoskeletal", "Psychiatric", "Endocrine", "General Health", etc.).
+       - If the call does not involve a medical subject (e.g., Appointment Scheduling, Billing), respond with "Not Applicable".
+
+    Respond in the following format:
+    Intent: Subject Matter
+    
+    Eg: Symptom Discussion: Gastrointestinal
 
     Transcript:
     "{full_transcript}"
     """
+
 
     try:
         # Call the Gemini API
@@ -100,7 +111,9 @@ def process_audio_file(audio_path, diarization_pipeline, transcription_model, in
         print(f"  - Found {num_speakers} speakers.")
     except Exception as e:
         print(f"  - Error during diarization: {e}")
-        os.remove(temp_wav_path)
+        # Ensure temp file is removed even on error
+        if os.path.exists(temp_wav_path):
+            os.remove(temp_wav_path)
         return None
 
     # --- Step 3.3: Transcription ---
@@ -149,6 +162,29 @@ if __name__ == "__main__":
     else:
         print("--- Starting Batch Processing Pipeline ---")
         
+        # --- Determine files to skip ---
+        # Create a set to store filenames that have already been processed
+        processed_files = set()
+        # Check if the output CSV already exists
+        if os.path.exists(OUTPUT_CSV_PATH):
+            try:
+                # Read the existing CSV
+                existing_df = pd.read_csv(OUTPUT_CSV_PATH)
+                # Check if the 'filename' column exists
+                if 'filename' in existing_df.columns:
+                    # Add all existing filenames to the set for fast lookup
+                    processed_files = set(existing_df['filename'].tolist())
+                    print(f"Found existing output file '{OUTPUT_CSV_PATH}'. Will skip {len(processed_files)} already processed file(s).")
+                else:
+                    # If 'filename' column is missing, log a warning but don't skip any files
+                    print(f"Warning: Existing CSV '{OUTPUT_CSV_PATH}' does not contain a 'filename' column. Processing all files.")
+            except Exception as e:
+                # If there's an error reading the CSV, log it but continue, processing all files
+                print(f"Warning: Could not read existing CSV '{OUTPUT_CSV_PATH}' ({e}). Processing all files.")
+        else:
+            # If the CSV doesn't exist, no files have been processed yet
+            print(f"No existing output file '{OUTPUT_CSV_PATH}' found. Processing all files.")
+
         # --- Initialize Models ONCE for efficiency ---
         print("Initializing models (this may take a moment)...")
         try:
@@ -163,7 +199,7 @@ if __name__ == "__main__":
 
             # Intent Analysis Model
             genai.configure(api_key=YOUR_GOOGLE_API_KEY)
-            intent_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            intent_model = genai.GenerativeModel('gemini-2.5-flash-lite')
             print("All models initialized successfully.")
 
         except Exception as e:
@@ -175,15 +211,23 @@ if __name__ == "__main__":
         supported_extensions = ["*.wav", "*.mp3", "*.m4a", "*.flac"]
         audio_files = []
         for ext in supported_extensions:
+            # Use recursive glob if you want to search subdirectories too: glob.glob(os.path.join(INPUT_FOLDER_PATH, "**", ext), recursive=True)
             audio_files.extend(glob.glob(os.path.join(INPUT_FOLDER_PATH, ext)))
 
         if not audio_files:
             print(f"No audio files found in '{INPUT_FOLDER_PATH}'.")
             exit()
 
-        # --- Process Each File ---
-        all_summaries = []
+        # --- Process Each File (skipping already processed ones) ---
+        new_summaries = [] # Store summaries of newly processed files
         for audio_file_path in audio_files:
+            filename = os.path.basename(audio_file_path)
+            # Check if the file has already been processed
+            if filename in processed_files:
+                print(f"\nSkipping already processed file: {filename}")
+                continue # Skip to the next file
+
+            # If not processed, process it
             summary = process_audio_file(
                 audio_file_path,
                 diarization_pipeline,
@@ -191,15 +235,27 @@ if __name__ == "__main__":
                 intent_model
             )
             if summary:
-                all_summaries.append(summary)
+                new_summaries.append(summary) # Add successful summary to the list
         
-        # --- Save Final Results ---
-        if not all_summaries:
-            print("\nNo files were successfully processed.")
+        # --- Save Final Results (Append new results) ---
+        if not new_summaries:
+             # Check if any files were skipped due to being processed before
+            if processed_files:
+                print("\nNo new files were processed. Output CSV is up-to-date.")
+            else:
+                 print("\nNo files were successfully processed.")
         else:
-            summary_df = pd.DataFrame(all_summaries)
-            summary_df.to_csv(OUTPUT_CSV_PATH, index=False)
-            print(f"\n--- Batch Processing Complete! ---")
-            print(f"Summary of {len(all_summaries)} file(s) saved to '{OUTPUT_CSV_PATH}'.")
+            # Create a DataFrame from the new summaries
+            new_summary_df = pd.DataFrame(new_summaries)
 
-
+            # Check if the output CSV already exists
+            if os.path.exists(OUTPUT_CSV_PATH):
+                # If it exists, append the new data without writing the header again
+                new_summary_df.to_csv(OUTPUT_CSV_PATH, mode='a', index=False, header=False)
+                print(f"\n--- Batch Processing Complete! ---")
+                print(f"Summary of {len(new_summaries)} new file(s) appended to '{OUTPUT_CSV_PATH}'.")
+            else:
+                # If it doesn't exist, create it with the header
+                new_summary_df.to_csv(OUTPUT_CSV_PATH, index=False)
+                print(f"\n--- Batch Processing Complete! ---")
+                print(f"Summary of {len(new_summaries)} new file(s) saved to new file '{OUTPUT_CSV_PATH}'.")
